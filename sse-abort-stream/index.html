@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>停止后生成停不停</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #09090b;
+        --ink: #f4f4f5;
+        --muted: #a1a1aa;
+        --faint: #71717a;
+        --line: rgba(255, 255, 255, 0.08);
+        --panel: #111113;
+        --panel-2: #0c0c0e;
+        font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--ink);
+        background:
+          radial-gradient(900px 420px at 50% -80px, rgba(255, 255, 255, 0.07), transparent 60%),
+          var(--bg);
+      }
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 48px 24px 64px;
+      }
+      .kicker {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 14px;
+        color: var(--faint);
+        font-size: 12px;
+        letter-spacing: 0.14em;
+      }
+      .kicker span:last-child { letter-spacing: 0.04em; }
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #d6d3d1;
+        box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.06);
+      }
+      h1 {
+        margin: 0;
+        font-size: 34px;
+        font-weight: 560;
+        letter-spacing: -0.03em;
+        line-height: 1.2;
+      }
+      .prompt {
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 15px;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin: 28px 0 16px;
+      }
+      button {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--ink);
+        border-radius: 999px;
+        padding: 9px 14px;
+        font: inherit;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.04); }
+      button:disabled { opacity: 0.35; cursor: default; }
+      button.primary {
+        background: #fafafa;
+        color: #09090b;
+        border-color: #fafafa;
+      }
+      button.primary:hover:not(:disabled) { background: #e4e4e7; }
+      #leak::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #d6a15a;
+      }
+      #stop { margin-left: auto; }
+      #stop:not(:disabled) {
+        background: #fafafa;
+        color: #09090b;
+        border-color: #fafafa;
+      }
+      #status {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      #answer {
+        min-height: 168px;
+        padding: 28px 28px 32px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        font-size: 26px;
+        font-weight: 450;
+        line-height: 1.65;
+        letter-spacing: -0.01em;
+        white-space: pre-wrap;
+      }
+      #answer:empty::before {
+        content: "回答会显示在这里";
+        color: #3f3f46;
+      }
+      #answer.is-streaming::after {
+        content: "";
+        display: inline-block;
+        width: 2px;
+        height: 0.85em;
+        margin-left: 2px;
+        background: #fafafa;
+        vertical-align: -1px;
+        animation: caret 1s steps(1) infinite;
+      }
+      @keyframes caret {
+        50% { opacity: 0; }
+      }
+      .console {
+        margin-top: 16px;
+        background: var(--panel-2);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        overflow: hidden;
+      }
+      .console-head {
+        display: flex;
+        justify-content: space-between;
+        padding: 12px 16px;
+        color: var(--faint);
+        font-size: 12px;
+        letter-spacing: 0.08em;
+        border-bottom: 1px solid var(--line);
+      }
+      #logs {
+        margin: 0;
+        padding: 14px 16px 16px;
+        min-height: 160px;
+        max-height: 240px;
+        overflow: auto;
+        color: #d4d4d8;
+        font-family: ui-monospace, "SF Mono", "Menlo", monospace;
+        font-size: 13px;
+        line-height: 1.6;
+        white-space: pre-wrap;
+      }
+      @media (max-width: 640px) {
+        main { padding: 28px 16px 40px; }
+        h1 { font-size: 26px; }
+        #stop { margin-left: 0; }
+        #answer { font-size: 20px; padding: 20px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="kicker"><i class="dot"></i><span>SSE</span><span>abort</span></p>
+      <h1>页面停了，生成停了吗</h1>
+      <p class="prompt">回答正在逐字出现。点停止，看服务端还写不写。</p>
+      <div class="actions">
+        <button id="stream" class="primary" type="button">会停止的实现</button>
+        <button id="leak" type="button">断开后继续生成</button>
+        <button id="stop" type="button" disabled>停止</button>
+      </div>
+      <p id="status">选一种实现，等几个字出来再停止</p>
+      <div id="answer"></div>
+      <section class="console">
+        <div class="console-head"><span>服务端日志</span><span>localhost</span></div>
+        <pre id="logs"></pre>
+      </section>
+    </main>
+    <script>
+      const answer = document.querySelector("#answer");
+      const status = document.querySelector("#status");
+      const logs = document.querySelector("#logs");
+      const stopButton = document.querySelector("#stop");
+      const buttons = [...document.querySelectorAll(".actions button")].filter(
+        (button) => button.id !== "stop",
+      );
+
+      let controller = null;
+      let pollTimer = null;
+
+      function stopPoll() {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+
+      function startPoll() {
+        stopPoll();
+        pollTimer = setInterval(async () => {
+          const res = await fetch("/api/logs");
+          const body = await res.json();
+          logs.textContent = body.logs.join("\n");
+          logs.scrollTop = logs.scrollHeight;
+        }, 200);
+      }
+
+      function setBusy(busy, stoppable) {
+        for (const button of buttons) button.disabled = busy;
+        stopButton.disabled = !stoppable;
+      }
+
+      function begin(label) {
+        controller?.abort();
+        controller = new AbortController();
+        answer.textContent = "";
+        answer.classList.add("is-streaming");
+        logs.textContent = "";
+        status.textContent = label;
+        setBusy(true, true);
+        startPoll();
+        return controller.signal;
+      }
+
+      function finish(label) {
+        answer.classList.remove("is-streaming");
+        status.textContent = label;
+        setBusy(false, false);
+      }
+
+      async function runStream(path, label) {
+        const signal = begin(label);
+        try {
+          const res = await fetch(path, { method: "POST", signal });
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          let doneSeen = false;
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const frames = buffer.split("\n\n");
+            buffer = frames.pop();
+            for (const frame of frames) {
+              const line = frame.split("\n").find((item) => item.startsWith("data: "));
+              if (!line) continue;
+              const data = JSON.parse(line.slice(6));
+              if (data.token) answer.textContent += data.token;
+              if (data.done) doneSeen = true;
+            }
+          }
+          finish(doneSeen ? "生成完成" : "连接已结束");
+        } catch (error) {
+          if (error.name === "AbortError") finish("页面已停止");
+          else finish(error.message);
+        }
+      }
+
+      document.querySelector("#stream").onclick = () =>
+        runStream("/api/chat/stream", "正在逐字推送");
+      document.querySelector("#leak").onclick = () =>
+        runStream("/api/chat/stream-leak", "错误实现：页面可以停，服务端不一定停");
+      stopButton.onclick = () => controller?.abort();
+    </script>
+  </body>
+</html>

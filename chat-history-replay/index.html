@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>模型是如何记住上下文的？</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #09090b;
+        --ink: #f4f4f5;
+        --muted: #a1a1aa;
+        --faint: #71717a;
+        --line: rgba(255, 255, 255, 0.08);
+        --panel: #111113;
+        font-family: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        overflow: hidden;
+        color: var(--ink);
+        background:
+          radial-gradient(900px 420px at 50% -80px, rgba(255, 255, 255, 0.07), transparent 60%),
+          var(--bg);
+      }
+      main {
+        max-width: 980px;
+        height: 100%;
+        margin: 0 auto;
+        padding: 36px 24px 24px;
+        display: flex;
+        flex-direction: column;
+      }
+      h1 {
+        margin: 0;
+        font-size: 32px;
+        font-weight: 560;
+        letter-spacing: -0.03em;
+        line-height: 1.2;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 22px 0 14px;
+      }
+      button {
+        appearance: none;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--ink);
+        border-radius: 999px;
+        padding: 9px 14px;
+        font: inherit;
+        font-size: 14px;
+        cursor: pointer;
+      }
+      button:hover { background: rgba(255, 255, 255, 0.04); }
+      button[aria-pressed="true"],
+      button.primary {
+        background: #fafafa;
+        color: #09090b;
+        border-color: #fafafa;
+      }
+      .work {
+        flex: 1;
+        min-height: 0;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        align-items: start;
+      }
+      .panel {
+        display: flex;
+        flex-direction: column;
+        max-height: 100%;
+        overflow: hidden;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 14px;
+        min-width: 0;
+      }
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 13px;
+        font-weight: 560;
+        color: var(--muted);
+      }
+      #chat {
+        min-height: 0;
+        overflow: auto;
+      }
+      .bubble { margin: 0 0 10px; }
+      .who {
+        margin-bottom: 4px;
+        color: var(--faint);
+        font-size: 12px;
+      }
+      .text {
+        margin: 0;
+        padding: 10px 12px;
+        border-radius: 12px;
+        line-height: 1.55;
+        background: #0c0c0e;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .bubble.assistant .text { background: transparent; border: 1px solid var(--line); }
+      .composer {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      #draft {
+        flex: 1;
+        min-width: 0;
+        border: 1px solid var(--line);
+        background: #0c0c0e;
+        color: var(--ink);
+        border-radius: 12px;
+        padding: 10px 12px;
+        font: inherit;
+        font-size: 14px;
+      }
+      #request {
+        margin: 0;
+        min-height: 0;
+        overflow: auto;
+        padding: 12px;
+        border-radius: 12px;
+        background: #0c0c0e;
+        color: #e4e4e7;
+        font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+        font-size: 13px;
+        line-height: 1.55;
+      }
+      #request .round {
+        margin: 0 0 14px;
+        padding: 10px;
+        border-radius: 12px;
+        box-shadow: inset 0 0 0 1px var(--line);
+      }
+      #request .round.current { box-shadow: inset 0 0 0 1px rgba(74, 222, 128, 0.7); }
+      #request .round:last-child { margin-bottom: 0; }
+      #request pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      @media (max-width: 800px) {
+        html, body { height: auto; overflow: auto; }
+        main { height: auto; display: block; }
+        .work { grid-template-columns: 1fr; }
+        #chat, #request { max-height: 70vh; }
+        h1 { font-size: 28px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>模型是如何记住上下文的？</h1>
+      <div class="actions">
+        <button id="latest" type="button" aria-pressed="true">问题</button>
+        <button id="history" type="button" aria-pressed="false">解决方案</button>
+      </div>
+      <div class="work">
+        <section class="panel">
+          <h2>页面上的对话</h2>
+          <div id="chat"></div>
+          <form class="composer" id="composer">
+            <input id="draft" type="text" placeholder="输入这句要说的话" autocomplete="off" />
+            <button class="primary" type="submit">发送</button>
+          </form>
+        </section>
+        <section class="panel">
+          <h2>每一轮请求的 messages</h2>
+          <div id="request">还没有请求</div>
+        </section>
+      </div>
+    </main>
+    <script>
+      const chat = document.querySelector("#chat");
+      const requestNode = document.querySelector("#request");
+      const draft = document.querySelector("#draft");
+      const transcript = []; // 页面自己留着对话。模型看不到这份数组，下一轮要靠它再发出去。
+      let mode = "latest";
+
+      function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text != null) node.textContent = text;
+        return node;
+      }
+
+      // 问题：只提交当前这一句。
+      function submitCurrent(content) {
+        return [{ role: "user", content }]; // 数组里就是输入框里的这句话
+      }
+
+      // 解决方案：带上历史记录。
+      function submitWithHistory() {
+        return transcript.map((message) => ({ ...message })); // 页面留下的每一条，含刚刚这句
+      }
+
+      function appendBubble(role, content) {
+        const block = el("article", `bubble ${role}`);
+        block.append(el("div", "who", role === "user" ? "用户" : "模型"), el("p", "text", content));
+        chat.append(block);
+        chat.scrollTop = chat.scrollHeight;
+      }
+
+      function showRequest(messages) {
+        if (!requestNode.querySelector(".round")) requestNode.replaceChildren();
+        requestNode.querySelector(".current")?.classList.remove("current"); // 上一轮去掉绿框
+        const block = el("section", "round current"); // 当前这一轮绿框
+        block.append(el("pre", "", JSON.stringify(messages, null, 2)));
+        requestNode.append(block);
+        requestNode.scrollTop = requestNode.scrollHeight;
+      }
+
+      function selectMode(next) {
+        mode = next;
+        document.querySelector("#latest").setAttribute("aria-pressed", String(next === "latest"));
+        document.querySelector("#history").setAttribute("aria-pressed", String(next === "history"));
+      }
+
+      document.querySelector("#latest").onclick = () => selectMode("latest");
+      document.querySelector("#history").onclick = () => selectMode("history");
+
+      document.querySelector("#composer").onsubmit = async (event) => {
+        event.preventDefault();
+        const content = draft.value.trim();
+        draft.value = "";
+        transcript.push({ role: "user", content }); // 先留在本地
+        appendBubble("user", content);
+        // 问题走 submitCurrent，解决方案走 submitWithHistory。
+        const messages = mode === "history" ? submitWithHistory() : submitCurrent(content);
+        showRequest(messages); // 每一轮单独留下这次的请求框
+        const data = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages }),
+        }).then((response) => response.json());
+        appendBubble("assistant", data.reply);
+        transcript.push({ role: "assistant", content: data.reply }); // 模型回复也要留下，下一轮选解决方案时才会一起提交
+      };
+    </script>
+  </body>
+</html>
